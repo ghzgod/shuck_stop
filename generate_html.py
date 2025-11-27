@@ -1,0 +1,717 @@
+"""
+HTML Generator for the Shuck Stop price comparison page.
+Generates a modern, responsive static HTML page showing only best deals per tier.
+"""
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
+
+
+@dataclass
+class DrivePrice:
+    """Represents a hard drive price entry."""
+
+    capacity_tb: float
+    model: str
+    source: str
+    retailer: str
+    price: Optional[float]
+    url: Optional[str]
+    price_per_tb: Optional[float] = None
+    is_available: bool = True
+    lowest_ever: Optional[float] = None
+    lowest_ever_date: Optional[str] = None
+
+    def __post_init__(self):
+        if self.price and self.capacity_tb and not self.price_per_tb:
+            self.price_per_tb = round(self.price / self.capacity_tb, 2)
+
+
+def get_price_grade(price_per_tb: float) -> tuple[str, str]:
+    """
+    Get a color grade based on price per TB.
+    Returns (grade_class, emoji).
+    """
+    if price_per_tb <= 12:
+        return "excellent", "🔥"
+    elif price_per_tb <= 13:
+        return "great", "💸"
+    elif price_per_tb <= 15:
+        return "good", "✅"
+    elif price_per_tb <= 17:
+        return "fair", "➖"
+    elif price_per_tb <= 20:
+        return "meh", "⚠️"
+    else:
+        return "bad", "❌"
+
+
+def find_best_prices(drives: list[DrivePrice]) -> dict[int, DrivePrice]:
+    """
+    Find the best price (lowest $/TB) for each capacity tier.
+    Only considers available drives with valid prices.
+    Returns dict sorted by capacity DESCENDING (highest first).
+    """
+    best = {}
+    for drive in drives:
+        if not drive.is_available or not drive.price_per_tb:
+            continue
+        cap = int(drive.capacity_tb)
+        if cap not in best or drive.price_per_tb < best[cap].price_per_tb:
+            best[cap] = drive
+    # Sort by capacity descending (highest first)
+    return dict(sorted(best.items(), reverse=True))
+
+
+def find_best_overall(drives: list[DrivePrice]) -> Optional[DrivePrice]:
+    """
+    Find the single best deal across all drives (lowest $/TB).
+    """
+    best = None
+    for drive in drives:
+        if not drive.is_available or not drive.price_per_tb:
+            continue
+        if best is None or drive.price_per_tb < best.price_per_tb:
+            best = drive
+    return best
+
+
+def truncate_model(model: str, max_length: int = 45) -> str:
+    """Truncate model name to a reasonable length."""
+    if len(model) <= max_length:
+        return model
+    return model[:max_length - 3].rsplit(' ', 1)[0] + "..."
+
+
+def generate_html(drives: list[DrivePrice], output_path: str = "index.html") -> str:
+    """
+    Generate the complete HTML page with best prices only.
+
+    Args:
+        drives: List of DrivePrice objects
+        output_path: Path to write the HTML file
+
+    Returns:
+        The generated HTML string
+    """
+    best_prices = find_best_prices(drives)
+    best_overall = find_best_overall(drives)
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+    # Generate best overall hero section
+    hero_html = _generate_hero(best_overall) if best_overall else ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shuck Stop - Best Hard Drive Deals</title>
+    <meta name="description" content="Find the best external hard drive deals for shucking. Best price per TB across all capacity tiers.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg-base: #0c0f14;
+            --bg-surface: #14181f;
+            --bg-elevated: #1a1f28;
+            --border-subtle: #252b36;
+            --border-muted: #1e232c;
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --cyan: #22d3ee;
+            --cyan-dim: rgba(34, 211, 238, 0.12);
+            --emerald: #34d399;
+            --emerald-dim: rgba(52, 211, 153, 0.12);
+            --amber: #fbbf24;
+            --amber-dim: rgba(251, 191, 36, 0.12);
+            --rose: #fb7185;
+            --rose-dim: rgba(251, 113, 133, 0.12);
+            --violet: #a78bfa;
+            --gold: #fcd34d;
+            --grade-fire: #22ff88;
+            --grade-great: #34d399;
+            --grade-good: #4ade80;
+            --grade-fair: #facc15;
+            --grade-meh: #fb923c;
+            --grade-bad: #f87171;
+        }}
+
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+
+        body {{
+            font-family: 'Sora', system-ui, sans-serif;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }}
+
+        /* Subtle grid pattern background */
+        body::before {{
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: 
+                linear-gradient(90deg, var(--border-muted) 1px, transparent 1px),
+                linear-gradient(var(--border-muted) 1px, transparent 1px);
+            background-size: 60px 60px;
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: -1;
+        }}
+
+        .container {{
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 3rem 1.5rem;
+        }}
+
+        /* Header */
+        header {{
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }}
+
+        .brand {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }}
+
+        .brand-icon {{
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, var(--cyan), var(--violet));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }}
+
+        h1 {{
+            font-size: 2.25rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, var(--cyan), var(--emerald));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }}
+
+        .tagline {{
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }}
+
+        .meta {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            padding: 0.5rem 1rem;
+            border-radius: 100px;
+        }}
+
+        /* Hero - Best Overall Deal */
+        .hero {{
+            background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(52, 211, 153, 0.1));
+            border: 2px solid var(--emerald);
+            border-radius: 16px;
+            padding: 1.75rem;
+            margin-bottom: 2.5rem;
+            position: relative;
+            overflow: hidden;
+        }}
+
+        .hero::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--cyan), var(--emerald), var(--gold));
+        }}
+
+        .hero-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: linear-gradient(135deg, var(--gold), var(--amber));
+            color: var(--bg-base);
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 0.375rem 0.875rem;
+            border-radius: 100px;
+            margin-bottom: 1rem;
+        }}
+
+        .hero-content {{
+            display: grid;
+            grid-template-columns: auto 1fr auto auto;
+            align-items: center;
+            gap: 1.5rem;
+        }}
+
+        .hero-capacity {{
+            font-family: 'DM Mono', monospace;
+            font-size: 2.5rem;
+            font-weight: 500;
+            color: var(--gold);
+            text-shadow: 0 0 20px rgba(252, 211, 77, 0.3);
+        }}
+
+        .hero-info {{
+            min-width: 0;
+        }}
+
+        .hero-model {{
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }}
+
+        .hero-source {{
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }}
+
+        .hero-pricing {{
+            text-align: right;
+        }}
+
+        .hero-price {{
+            font-family: 'DM Mono', monospace;
+            font-size: 1.75rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }}
+
+        .hero-pptb {{
+            font-family: 'DM Mono', monospace;
+            font-size: 1.125rem;
+            color: var(--grade-fire);
+            text-shadow: 0 0 10px rgba(34, 255, 136, 0.3);
+        }}
+
+        .hero-action {{
+            flex-shrink: 0;
+        }}
+
+        .hero-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.875rem 1.5rem;
+            background: linear-gradient(135deg, var(--gold), var(--amber));
+            color: var(--bg-base);
+            font-family: 'Sora', sans-serif;
+            font-size: 0.9375rem;
+            font-weight: 700;
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }}
+
+        .hero-btn:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(252, 211, 77, 0.3);
+        }}
+
+        /* Best Deals Grid */
+        .deals-section {{
+            margin-bottom: 3rem;
+        }}
+
+        .section-header {{
+            display: flex;
+            align-items: center;
+            gap: 0.625rem;
+            margin-bottom: 1.25rem;
+        }}
+
+        .section-header h2 {{
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }}
+
+        .deals-grid {{
+            display: flex;
+            flex-direction: column;
+            gap: 0.625rem;
+        }}
+
+        /* Deal Row - Horizontal Card */
+        .deal-row {{
+            display: grid;
+            grid-template-columns: 80px 1fr auto auto;
+            align-items: center;
+            gap: 1.25rem;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+            transition: all 0.15s ease;
+        }}
+
+        .deal-row:hover {{
+            background: var(--bg-elevated);
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 1px var(--cyan), 0 8px 24px -8px rgba(0, 0, 0, 0.4);
+        }}
+
+        .deal-capacity {{
+            font-family: 'DM Mono', monospace;
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--cyan);
+            text-align: center;
+        }}
+
+        .deal-info {{
+            min-width: 0;
+        }}
+
+        .deal-model {{
+            font-size: 0.9375rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+
+        .deal-source {{
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            margin-top: 0.125rem;
+        }}
+
+        .deal-pricing {{
+            text-align: right;
+            padding-right: 0.5rem;
+        }}
+
+        .deal-price {{
+            font-family: 'DM Mono', monospace;
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }}
+
+        .deal-pptb {{
+            font-family: 'DM Mono', monospace;
+            font-size: 0.875rem;
+            margin-top: 0.125rem;
+        }}
+
+        .pptb-excellent {{ color: var(--grade-fire); }}
+        .pptb-great {{ color: var(--grade-great); }}
+        .pptb-good {{ color: var(--grade-good); }}
+        .pptb-fair {{ color: var(--grade-fair); }}
+        .pptb-meh {{ color: var(--grade-meh); }}
+        .pptb-bad {{ color: var(--grade-bad); }}
+
+        .deal-action {{
+            flex-shrink: 0;
+        }}
+
+        .deal-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.625rem 1.125rem;
+            background: linear-gradient(135deg, var(--cyan), var(--emerald));
+            color: var(--bg-base);
+            font-family: 'Sora', sans-serif;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            text-decoration: none;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }}
+
+        .deal-btn:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
+        }}
+
+        /* Grade indicator */
+        .grade-dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.375rem;
+        }}
+
+        .grade-dot.excellent {{ background: var(--grade-fire); box-shadow: 0 0 8px var(--grade-fire); }}
+        .grade-dot.great {{ background: var(--grade-great); }}
+        .grade-dot.good {{ background: var(--grade-good); }}
+        .grade-dot.fair {{ background: var(--grade-fair); }}
+        .grade-dot.meh {{ background: var(--grade-meh); }}
+        .grade-dot.bad {{ background: var(--grade-bad); }}
+
+        /* Legend */
+        .legend {{
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+        }}
+
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }}
+
+        .legend-dot {{
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }}
+
+        /* Footer */
+        footer {{
+            text-align: center;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+        }}
+
+        footer a {{
+            color: var(--text-secondary);
+            text-decoration: none;
+        }}
+
+        footer a:hover {{
+            color: var(--cyan);
+        }}
+
+        footer p + p {{
+            margin-top: 0.5rem;
+        }}
+
+        /* Mobile */
+        @media (max-width: 640px) {{
+            .container {{
+                padding: 2rem 1rem;
+            }}
+
+            h1 {{
+                font-size: 1.75rem;
+            }}
+
+            .hero-content {{
+                grid-template-columns: 1fr;
+                gap: 1rem;
+                text-align: center;
+            }}
+
+            .hero-capacity {{
+                font-size: 2rem;
+            }}
+
+            .hero-pricing {{
+                text-align: center;
+            }}
+
+            .hero-btn {{
+                width: 100%;
+                justify-content: center;
+            }}
+
+            .deal-row {{
+                grid-template-columns: 60px 1fr;
+                grid-template-rows: auto auto;
+                gap: 0.75rem 1rem;
+                padding: 1rem;
+            }}
+
+            .deal-capacity {{
+                font-size: 1.25rem;
+            }}
+
+            .deal-pricing {{
+                text-align: left;
+                padding-right: 0;
+                grid-column: 2;
+            }}
+
+            .deal-action {{
+                grid-column: 1 / -1;
+            }}
+
+            .deal-btn {{
+                width: 100%;
+                justify-content: center;
+            }}
+
+            .legend {{
+                gap: 0.625rem 1rem;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="brand">
+                <div class="brand-icon">💿</div>
+                <h1>Shuck Stop</h1>
+            </div>
+            <p class="tagline">Best external HDD prices for shucking</p>
+            <div class="meta">
+                <span>🔄</span>
+                <span>Updated {timestamp}</span>
+            </div>
+        </header>
+
+{hero_html}
+
+        <section class="deals-section">
+            <div class="section-header">
+                <span>📊</span>
+                <h2>Best Deal Per Capacity</h2>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: var(--grade-fire); box-shadow: 0 0 6px var(--grade-fire);"></div>
+                    <span>≤$12/TB</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: var(--grade-great);"></div>
+                    <span>≤$13/TB</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: var(--grade-good);"></div>
+                    <span>≤$15/TB</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: var(--grade-fair);"></div>
+                    <span>≤$17/TB</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: var(--grade-meh);"></div>
+                    <span>≤$20/TB</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background: var(--grade-bad);"></div>
+                    <span>&gt;$20/TB</span>
+                </div>
+            </div>
+
+            <div class="deals-grid">
+{_generate_deal_rows(best_prices)}
+            </div>
+        </section>
+
+        <footer>
+            <p>Data from <a href="https://shucks.top/" target="_blank">shucks.top</a> &amp; <a href="https://diskprices.com/" target="_blank">diskprices.com</a></p>
+            <p>Auto-updates every 12 hours via GitHub Actions</p>
+        </footer>
+    </div>
+</body>
+</html>"""
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    return html
+
+
+def _generate_hero(drive: DrivePrice) -> str:
+    """Generate HTML for the best overall deal hero section."""
+    grade, emoji = get_price_grade(drive.price_per_tb)
+    url = drive.url if drive.url else "#"
+    model_display = truncate_model(drive.model, 60)
+    capacity = int(drive.capacity_tb)
+
+    return f"""        <section class="hero">
+            <div class="hero-badge">
+                <span>👑</span>
+                <span>Best Overall Deal</span>
+            </div>
+            <div class="hero-content">
+                <div class="hero-capacity">{capacity}TB</div>
+                <div class="hero-info">
+                    <div class="hero-model">{model_display}</div>
+                    <div class="hero-source">{drive.retailer} via {drive.source}</div>
+                </div>
+                <div class="hero-pricing">
+                    <div class="hero-price">${drive.price:.2f}</div>
+                    <div class="hero-pptb">${drive.price_per_tb:.2f}/TB</div>
+                </div>
+                <div class="hero-action">
+                    <a href="{url}" class="hero-btn" target="_blank" rel="noopener">🔥 Get This Deal</a>
+                </div>
+            </div>
+        </section>
+"""
+
+
+def _generate_deal_rows(best_prices: dict[int, DrivePrice]) -> str:
+    """Generate HTML for deal rows."""
+    rows = []
+    for capacity, drive in best_prices.items():
+        grade, emoji = get_price_grade(drive.price_per_tb)
+        url = drive.url if drive.url else "#"
+        model_display = truncate_model(drive.model)
+
+        row = f"""                <div class="deal-row">
+                    <div class="deal-capacity">{capacity}TB</div>
+                    <div class="deal-info">
+                        <div class="deal-model" title="{drive.model}">{model_display}</div>
+                        <div class="deal-source">{drive.retailer} via {drive.source}</div>
+                    </div>
+                    <div class="deal-pricing">
+                        <div class="deal-price">${drive.price:.2f}</div>
+                        <div class="deal-pptb pptb-{grade}"><span class="grade-dot {grade}"></span>${drive.price_per_tb:.2f}/TB</div>
+                    </div>
+                    <div class="deal-action">
+                        <a href="{url}" class="deal-btn" target="_blank" rel="noopener">View Deal →</a>
+                    </div>
+                </div>"""
+        rows.append(row)
+
+    return "\n".join(rows)
+
+
+if __name__ == "__main__":
+    # Test with sample data
+    test_drives = [
+        DrivePrice(8, "Seagate Expansion 8TB", "diskprices.com", "Amazon", 137.00, "https://amazon.com/test", is_available=True),
+        DrivePrice(10, "WD Elements 10TB", "diskprices.com", "Amazon", 174.00, "https://amazon.com/test", is_available=True),
+        DrivePrice(14, "WD Elements 14TB", "shucks.top", "eBay", 173.49, "https://ebay.com/test", is_available=True),
+        DrivePrice(16, "Seagate Expansion 16TB", "diskprices.com", "Amazon", 199.99, "https://amazon.com/test", is_available=True),
+        DrivePrice(18, "Seagate One Touch 18TB", "diskprices.com", "Amazon", 269.99, "https://amazon.com/test", is_available=True),
+        DrivePrice(20, "WD Easystore 20TB", "shucks.top", "Best Buy", 299.99, "https://bestbuy.com/test", is_available=True),
+    ]
+    html = generate_html(test_drives, "test_output.html")
+    print("Generated test_output.html")
